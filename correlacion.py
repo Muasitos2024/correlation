@@ -8,11 +8,12 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import mean_squared_error, r2_score
 from scipy.optimize import curve_fit
+from scipy.stats import norm
 
 class CorrelationRegressionApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Advanced Correlation and Regression Calculator of Valeri@ Arriaga Vilchez")
+        self.root.title("Advanced Correlation and Regression Calculator")
 
         style = ttk.Style()
         style.configure('TFrame', background='#f0f0f0')
@@ -37,7 +38,7 @@ class CorrelationRegressionApp:
         self.regression_type.grid(row=2, column=1, padx=5, pady=5)
         self.regression_type.current(0)  # set default value
 
-        self.clear_button = ttk.Button(frame, text="Clear All", command=self.clear_all)
+        self.clear_button = ttk.Button(frame, text="Limpiar todo", command=self.clear_all)
         self.clear_button.grid(row=3, column=0, columnspan=2, padx=5, pady=5)
 
         self.entries_frame = ttk.Frame(frame, padding="10")
@@ -46,10 +47,10 @@ class CorrelationRegressionApp:
         self.save_button = ttk.Button(frame, text="Save as SVG", command=self.save_as_svg)
         self.save_button.grid(row=5, column=0, columnspan=2, padx=5, pady=5)
 
-        self.show_correlation_button = ttk.Button(frame, text="Show Correlation Matrix", command=self.show_correlation_matrix)
+        self.show_correlation_button = ttk.Button(frame, text="Mostrar matriz de correlaciones", command=self.show_correlation_matrix)
         self.show_correlation_button.grid(row=6, column=0, padx=5, pady=5)
 
-        self.show_regression_button = ttk.Button(frame, text="Show Regression Matrix", command=self.show_regression_matrix)
+        self.show_regression_button = ttk.Button(frame, text="Mostrar matriz de regresión", command=self.show_regression_matrix)
         self.show_regression_button.grid(row=6, column=1, padx=5, pady=5)
 
     def create_entries(self):
@@ -67,7 +68,7 @@ class CorrelationRegressionApp:
             entry.grid(row=i, column=1, padx=5, pady=5)
             self.var_names.append(entry)
 
-            data_label = ttk.Label(self.entries_frame, text=f"Variable {i+1} Data (comma separated):")
+            data_label = ttk.Label(self.entries_frame, text=f"Variable {i+1} Data (comma or space separated):")
             data_label.grid(row=i, column=2, padx=5, pady=5)
             data_entry = ttk.Entry(self.entries_frame)
             data_entry.grid(row=i, column=3, padx=5, pady=5)
@@ -87,13 +88,15 @@ class CorrelationRegressionApp:
         data = []
         for entry in self.var_data:
             try:
-                data.append(list(map(float, entry.get().split(','))))
+                cleaned_data = entry.get().replace(',', ' ')
+                cleaned_data = ' '.join(cleaned_data.split())
+                data.append(list(map(float, cleaned_data.split(' '))))
             except ValueError:
-                messagebox.showerror("Input Error", "Please enter valid numbers separated by commas.")
+                messagebox.showerror("Input Error", "Introduzca números válidos separados por comas o espacios.")
                 return
 
         if not all(len(d) == len(data[0]) for d in data):
-            messagebox.showerror("Input Error", "All variables must have the same number of data points.")
+            messagebox.showerror("Input Error", "Todas las variables deben tener el mismo número de puntos de datos.")
             return
 
         self.df = pd.DataFrame(data).T
@@ -112,132 +115,131 @@ class CorrelationRegressionApp:
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         fig.suptitle('Correlation Matrices')
 
-        sns.heatmap(pearson_corr, ax=axes[0], annot=True, cmap='viridis')
+        sns.heatmap(pearson_corr, ax=axes[0], annot=True, cmap='coolwarm', linewidths=0.5, linecolor='black')
         axes[0].set_title('Pearson Correlation')
 
-        sns.heatmap(kendall_corr, ax=axes[1], annot=True, cmap='viridis')
+        sns.heatmap(kendall_corr, ax=axes[1], annot=True, cmap='coolwarm', linewidths=0.5, linecolor='black')
         axes[1].set_title('Kendall Correlation')
 
-        sns.heatmap(spearman_corr, ax=axes[2], annot=True, cmap='viridis')
+        sns.heatmap(spearman_corr, ax=axes[2], annot=True, cmap='coolwarm', linewidths=0.5, linecolor='black')
         axes[2].set_title('Spearman Correlation')
 
+        plt.tight_layout()
         plt.show()
 
     def show_regression_matrix(self):
         if not hasattr(self, 'df'):
-            messagebox.showerror("Error", "No data to show.")
+            messagebox.showerror("Error", "No hay datos que mostrar.")
             return
 
         regression_type = self.regression_type.get()
         g = sns.PairGrid(self.df, palette="husl")
-        
-        def linear_regression(x, y, **kwargs):
+
+        def linear_regression(x, y):
             x = x.values.reshape(-1, 1)
             reg = LinearRegression().fit(x, y)
             y_pred = reg.predict(x)
-            plt.plot(x, y_pred, color='purple')
-        
+            r2 = r2_score(y, y_pred)
+            mse = mean_squared_error(y, y_pred)
+            return y_pred, reg.intercept_, reg.coef_[0], r2, mse
+
         def exponential_regression(x, y):
-            x = x.values
             def exponential_func(x, a, b):
                 return a * np.exp(b * x)
-            popt, _ = curve_fit(exponential_func, x, y)
+            popt, _ = curve_fit(exponential_func, x.values.ravel(), y)
             y_pred = exponential_func(x, *popt)
-            plt.plot(x, y_pred, color='purple')
-        
+            r2 = r2_score(y, y_pred)
+            mse = mean_squared_error(y, y_pred)
+            return y_pred, popt[0], popt[1], r2, mse
+
         def quadratic_regression(x, y):
             x = x.values.reshape(-1, 1)
             poly = PolynomialFeatures(degree=2)
             X_poly = poly.fit_transform(x)
             reg = LinearRegression().fit(X_poly, y)
             y_pred = reg.predict(X_poly)
-            plt.plot(x, y_pred, color='purple')
-        
+            r2 = r2_score(y, y_pred)
+            mse = mean_squared_error(y, y_pred)
+            return y_pred, reg.intercept_, reg.coef_, r2, mse
+
         def cubic_regression(x, y):
             x = x.values.reshape(-1, 1)
             poly = PolynomialFeatures(degree=3)
             X_poly = poly.fit_transform(x)
             reg = LinearRegression().fit(X_poly, y)
             y_pred = reg.predict(X_poly)
-            plt.plot(x, y_pred, color='purple')
-        
+            r2 = r2_score(y, y_pred)
+            mse = mean_squared_error(y, y_pred)
+            return y_pred, reg.intercept_, reg.coef_, r2, mse
+
         def logarithmic_regression(x, y):
-            x = x.values
             def logarithmic_func(x, a, b):
                 return a * np.log(x) + b
-            popt, _ = curve_fit(logarithmic_func, x, y)
+            popt, _ = curve_fit(logarithmic_func, x.values.ravel(), y)
             y_pred = logarithmic_func(x, *popt)
-            plt.plot(x, y_pred, color='purple')
+            r2 = r2_score(y, y_pred)
+            mse = mean_squared_error(y, y_pred)
+            return y_pred, popt[0], popt[1], r2, mse
 
         def plot_regression(x, y, **kwargs):
             ax = plt.gca()
             ax.scatter(x, y, **kwargs)
             if regression_type == "Linear":
-                linear_regression(x, y)
+                y_pred, intercept, slope, r2, mse = linear_regression(x, y)
+                ax.plot(x, y_pred, color='blue', label=f'$R^2 = {r2:.2f}$, MSE = {mse:.2f}')
             elif regression_type == "Exponential":
-                exponential_regression(x, y)
+                y_pred, a, b, r2, mse = exponential_regression(x, y)
+                ax.plot(x, y_pred, color='blue', label=f'$R^2 = {r2:.2f}$, MSE = {mse:.2f}')
             elif regression_type == "Quadratic":
-                quadratic_regression(x, y)
+                y_pred, intercept, coef, r2, mse = quadratic_regression(x, y)
+                ax.plot(x, y_pred, color='blue', label=f'$R^2 = {r2:.2f}$, MSE = {mse:.2f}')
             elif regression_type == "Cubic":
-                cubic_regression(x, y)
+                y_pred, intercept, coef, r2, mse = cubic_regression(x, y)
+                ax.plot(x, y_pred, color='blue', label=f'$R^2 = {r2:.2f}$, MSE = {mse:.2f}')
             elif regression_type == "Logarithmic":
-                logarithmic_regression(x, y)
-        
-        def plot_distribution(x, **kwargs):
-            sns.histplot(x, kde=True, **kwargs)
-        
+                y_pred, a, b, r2, mse = logarithmic_regression(x, y)
+                ax.plot(x, y_pred, color='blue', label=f'$R^2 = {r2:.2f}$, MSE = {mse:.2f}')
+
+            ax.legend()
+
         def plot_equation(x, y, **kwargs):
             ax = plt.gca()
             if regression_type == "Linear":
-                x = x.values.reshape(-1, 1)
-                reg = LinearRegression().fit(x, y)
-                y_pred = reg.predict(x)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {reg.intercept_:.2f} + {reg.coef_[0]:.2f}x\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
+                _, intercept, slope, _, _ = linear_regression(x, y)
+                equation = f'y = {intercept:.2f} + {slope:.2f}x'
             elif regression_type == "Exponential":
-                x = x.values
-                popt, _ = curve_fit(lambda t,a,b: a*np.exp(b*t), x.ravel(), y)
-                y_pred = popt[0]*np.exp(popt[1]*x)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {popt[0]:.2f}e^({popt[1]:.2f}x)\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
+                _, a, b, _, _ = exponential_regression(x, y)
+                equation = f'y = {a:.2f} * exp({b:.2f}x)'
             elif regression_type == "Quadratic":
-                x = x.values.reshape(-1, 1)
-                poly = PolynomialFeatures(degree=2)
-                X_poly = poly.fit_transform(x)
-                reg = LinearRegression().fit(X_poly, y)
-                y_pred = reg.predict(X_poly)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {reg.intercept_:.2f} + {reg.coef_[1]:.2f}x + {reg.coef_[2]:.2f}x^2\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
+                _, intercept, coef, _, _ = quadratic_regression(x, y)
+                equation = f'y = {intercept:.2f} + {coef[1]:.2f}x + {coef[2]:.2f}x²'
             elif regression_type == "Cubic":
-                x = x.values.reshape(-1, 1)
-                poly = PolynomialFeatures(degree=3)
-                X_poly = poly.fit_transform(x)
-                reg = LinearRegression().fit(X_poly, y)
-                y_pred = reg.predict(X_poly)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {reg.intercept_:.2f} + {reg.coef_[1]:.2f}x + {reg.coef_[2]:.2f}x^2 + {reg.coef_[3]:.2f}x^3\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
+                _, intercept, coef, _, _ = cubic_regression(x, y)
+                equation = f'y = {intercept:.2f} + {coef[1]:.2f}x + {coef[2]:.2f}x² + {coef[3]:.2f}x³'
             elif regression_type == "Logarithmic":
-                x = x.values
-                popt, _ = curve_fit(lambda t,a,b: a*np.log(t)+b, x.ravel(), y)
-                y_pred = popt[0]*np.log(x)+popt[1]
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {popt[0]:.2f}ln(x) + {popt[1]:.2f}\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
-            ax.text(0.05, 0.95, equation, transform=ax.transAxes, fontsize=10, verticalalignment='top')
+                _, a, b, _, _ = logarithmic_regression(x, y)
+                equation = f'y = {a:.2f} * ln(x) + {b:.2f}'
+            ax.text(0.1, 0.9, equation, transform=ax.transAxes, fontsize=10, verticalalignment='top')
+
+        def plot_distribution(x, **kwargs):
+            ax = plt.gca()
+            sns.histplot(x, kde=False, color='gray', ax=ax)
+            mean = np.mean(x)
+            std = np.std(x)
+            xmin, xmax = ax.get_xlim()
+            x_norm = np.linspace(xmin, xmax, 100)
+            p = norm.pdf(x_norm, mean, std)
+            ax.plot(x_norm, p * len(x) * (xmax - xmin) / 10, 'r--')
 
         g.map_lower(plot_regression)
         g.map_diag(plot_distribution)
         g.map_upper(plot_equation)
-        g.fig.subplots_adjust(hspace=0.3, wspace=0.3)
+
         plt.show()
 
     def save_as_svg(self):
         if not hasattr(self, 'df'):
-            messagebox.showerror("Error", "No data to save.")
+            messagebox.showerror("Error", "No hay datos que guardar.")
             return
 
         file_path = filedialog.asksaveasfilename(defaultextension=".svg", filetypes=[("SVG files", "*.svg")])
@@ -252,129 +254,25 @@ class CorrelationRegressionApp:
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
         fig.suptitle('Correlation Matrices')
 
-        sns.heatmap(pearson_corr, ax=axes[0], annot=True, cmap='ocean')
+        sns.heatmap(pearson_corr, ax=axes[0], annot=True, cmap='coolwarm', linewidths=0.5, linecolor='black')
         axes[0].set_title('Pearson Correlation')
 
-        sns.heatmap(kendall_corr, ax=axes[1], annot=True, cmap='ocean')
+        sns.heatmap(kendall_corr, ax=axes[1], annot=True, cmap='coolwarm', linewidths=0.5, linecolor='black')
         axes[1].set_title('Kendall Correlation')
 
-        sns.heatmap(spearman_corr, ax=axes[2], annot=True, cmap='ocean')
+        sns.heatmap(spearman_corr, ax=axes[2], annot=True, cmap='coolwarm', linewidths=0.5, linecolor='black')
         axes[2].set_title('Spearman Correlation')
 
         plt.savefig(file_path, format='svg')
         plt.close(fig)
 
-        regression_type = self.regression_type.get()
-        g = sns.PairGrid(self.df, palette="Paired")
-        
-        def linear_regression(x, y, **kwargs):
-            x = x.values.reshape(-1, 1)
-            reg = LinearRegression().fit(x, y)
-            y_pred = reg.predict(x)
-            plt.plot(x, y_pred, color='purple')
-        
-        def exponential_regression(x, y):
-            x = x.values
-            def exponential_func(x, a, b):
-                return a * np.exp(b * x)
-            popt, _ = curve_fit(exponential_func, x, y)
-            y_pred = exponential_func(x, *popt)
-            plt.plot(x, y_pred, color='purple')
-        
-        def quadratic_regression(x, y):
-            x = x.values.reshape(-1, 1)
-            poly = PolynomialFeatures(degree=2)
-            X_poly = poly.fit_transform(x)
-            reg = LinearRegression().fit(X_poly, y)
-            y_pred = reg.predict(X_poly)
-            plt.plot(x, y_pred, color='purple')
-        
-        def cubic_regression(x, y):
-            x = x.values.reshape(-1, 1)
-            poly = PolynomialFeatures(degree=3)
-            X_poly = poly.fit_transform(x)
-            reg = LinearRegression().fit(X_poly, y)
-            y_pred = reg.predict(X_poly)
-            plt.plot(x, y_pred, color='purple')
-        
-        def logarithmic_regression(x, y):
-            x = x.values
-            def logarithmic_func(x, a, b):
-                return a * np.log(x) + b
-            popt, _ = curve_fit(logarithmic_func, x, y)
-            y_pred = logarithmic_func(x, *popt)
-            plt.plot(x, y_pred, color='purple')
-
-        def plot_regression(x, y, **kwargs):
-            ax = plt.gca()
-            ax.scatter(x, y, **kwargs)
-            if regression_type == "Linear":
-                linear_regression(x, y)
-            elif regression_type == "Exponential":
-                exponential_regression(x, y)
-            elif regression_type == "Quadratic":
-                quadratic_regression(x, y)
-            elif regression_type == "Cubic":
-                cubic_regression(x, y)
-            elif regression_type == "Logarithmic":
-                logarithmic_regression(x, y)
-        
-        def plot_distribution(x, **kwargs):
-            sns.histplot(x, kde=True, **kwargs)
-        
-        def plot_equation(x, y, **kwargs):
-            ax = plt.gca()
-            if regression_type == "Linear":
-                x = x.values.reshape(-1, 1)
-                reg = LinearRegression().fit(x, y)
-                y_pred = reg.predict(x)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {reg.intercept_:.2f} + {reg.coef_[0]:.2f}x\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
-            elif regression_type == "Exponential":
-                x = x.values
-                popt, _ = curve_fit(lambda t,a,b: a*np.exp(b*t), x.ravel(), y)
-                y_pred = popt[0]*np.exp(popt[1]*x)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {popt[0]:.2f}e^({popt[1]:.2f}x)\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
-            elif regression_type == "Quadratic":
-                x = x.values.reshape(-1, 1)
-                poly = PolynomialFeatures(degree=2)
-                X_poly = poly.fit_transform(x)
-                reg = LinearRegression().fit(X_poly, y)
-                y_pred = reg.predict(X_poly)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {reg.intercept_:.2f} + {reg.coef_[1]:.2f}x + {reg.coef_[2]:.2f}x^2\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
-            elif regression_type == "Cubic":
-                x = x.values.reshape(-1, 1)
-                poly = PolynomialFeatures(degree=3)
-                X_poly = poly.fit_transform(x)
-                reg = LinearRegression().fit(X_poly, y)
-                y_pred = reg.predict(X_poly)
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {reg.intercept_:.2f} + {reg.coef_[1]:.2f}x + {reg.coef_[2]:.2f}x^2 + {reg.coef_[3]:.2f}x^3\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
-            elif regression_type == "Logarithmic":
-                x = x.values
-                popt, _ = curve_fit(lambda t,a,b: a*np.log(t)+b, x.ravel(), y)
-                y_pred = popt[0]*np.log(x)+popt[1]
-                mse = mean_squared_error(y, y_pred)
-                r2 = r2_score(y, y_pred)
-                equation = f'y = {popt[0]:.2f}ln(x) + {popt[1]:.2f}\nMSE: {mse:.2f}\nR^2: {r2:.2f}'
-            ax.text(0.05, 0.95, equation, transform=ax.transAxes, fontsize=10, verticalalignment='top')
-
-        g.map_lower(plot_regression)
-        g.map_diag(plot_distribution)
-        g.map_upper(plot_equation)
-        g.fig.subplots_adjust(hspace=0.3, wspace=0.3)
-
-        g.savefig(file_path.replace(".svg", "_regression.svg"), format='svg')
-        plt.close(g.fig)
-
 if __name__ == "__main__":
     root = tk.Tk()
     app = CorrelationRegressionApp(root)
     root.mainloop()
-    
+
+
+
+
+
+
